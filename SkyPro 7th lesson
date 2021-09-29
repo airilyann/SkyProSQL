@@ -1,0 +1,775 @@
+-- https://skills.skyeng.ru/student-cabinet/stream-lesson/2345/theory/2
+-- форматирование первого примера в уроке (из домашки)
+with cohorts as (
+select 
+    p.user_id,
+    min(p.transaction_datetime) as first_payment
+from 
+    skyeng_db.payments p
+where 
+    p.operation_name = 'Покупка уроков'
+    and p.status_name = 'success'
+    and p.transaction_datetime >= '2016-01-01'
+    and p.transaction_datetime < '2017-01-01'
+group by 1
+)
+, b2c_payments as (
+select 
+    p.user_id,
+    count(distinct p.id_transaction) as transactions
+from 
+    skyeng_db.payments p
+    join cohorts c on c.user_id = p.user_id and (p.transaction_datetime::date - c.first_payment::date) < 90
+where 
+    p.operation_name = 'Покупка уроков'
+    and p.status_name = 'success'
+    and p.transaction_datetime >= '2016-01-01'
+    and p.transaction_datetime < '2017-01-01'
+group by 1
+)
+select 
+    transactions,
+    count(user_id) as users
+    count(user_id)::float / (select count(user_id) from b2c_payments) as users_share
+from 
+    b2c_payments
+group by 
+    transactions
+order by 
+    transactions
+    
+    
+    
+-- Новый запрос, им можно заменить текущий пример с "демонстрируем возможности оконных функций"  
+-- Запрос со всеми функциями для урока     
+select 
+    p.user_id,
+    coalesce(p.id_transaction, 0) as id_transaction,
+    p.payment_amount,
+    p.transaction_datetime,
+    count(1) over(partition by p.user_id) as user_cnt,
+    sum(p.payment_amount) over (partition by p.user_id) as user_payments,
+    sum(p.classes) over (partition by p.user_id) as user_classes,
+    count(1) over(partition by p.user_id order by p.transaction_datetime) as user_payment_number,
+    row_number() over (partition by user_id) as user_payment_number_2,
+    count(1) over() as total,
+    lag(p.transaction_datetime) over (partition by p.user_id) as prev_transaction_datetime,
+    lead(p.transaction_datetime)  over (partition by p.user_id) as next_transaction_datetime,
+    avg(p.payment_amount) over (partition by p.user_id) as avg_payment
+    -- percentile_cont(0.5) within group (order by p.payment_amount) median_payment
+from
+    skyeng_db.payments p
+where
+    p.status_name = 'success'
+    and p.transaction_datetime >= '2017-01-01'
+order by 
+    5 desc, 1, 4
+    
+    
+    
+
+-- демонстрируем возможности оконных функций
+select 
+    user_id,
+    id_class,
+    class_start_datetime,
+    class_end_datetime,
+    class_removed_datetime,
+    id_teacher,
+    class_status,
+    class_status_datetime,
+    class_type,
+    class_end_datetime - class_start_datetime as class_duration,
+    sum(class_end_datetime - class_start_datetime) over () sum_time,
+    sum(class_end_datetime - class_start_datetime) over (partition by user_id) as user_sum_time,
+    sum (class_end_datetime - class_start_datetime) over (partition by user_id order by class_start_datetime) as cumulative_user_sum_time,
+    row_number () over() as n1,
+    row_number () over(order by class_start_datetime) as n2,
+    row_number () over (partition by user_id, class_type order by class_start_datetime) as n3
+from
+    skyeng_db.classes
+where 
+    user_id in (250817207, 443403791)
+    and class_status = 'success'
+order by 
+    user_id, class_start_datetime
+
+
+
+-- решение первой маленькой задачи
+select 
+    *
+from 
+    skyeng_db.payments
+limit 100
+
+
+select 
+    *
+from 
+    skyeng_db.payments
+where 
+    id_transaction is not null 
+    and status_name = 'success'
+    and date_part('year', transaction_datetime) in (2016, 2017)
+limit 100
+
+
+select 
+    date_part('year', transaction_datetime) pay_year,
+    date_part('month', transaction_datetime) pay_month,
+    sum(payment_amount) revenue
+from 
+    skyeng_db.payments
+where 
+    id_transaction is not null 
+    and status_name = 'success'
+    and date_part('year', transaction_datetime) in (2016, 2017)
+group by 1,2
+order by 1,2
+
+
+with revenue_monthly as (
+select 
+    date_part('year', transaction_datetime) pay_year,
+    date_part('month', transaction_datetime) pay_month,
+    sum(payment_amount) revenue
+from 
+    skyeng_db.payments
+where 
+    id_transaction is not null 
+    and status_name = 'success'
+    and date_part('year', transaction_datetime) in (2016, 2017)
+group by 1,2
+order by 1,2
+)
+select 
+    pay_year,
+    pay_month,
+    revenue,
+    sum(revenue) over() as total_revenue,
+    sum(revenue) over(partition by pay_year order by pay_month) as cumulative_revenue
+from 
+    revenue_monthly
+
+
+-- решение второй большой задачи 
+
+select 
+    *
+from 
+    skyeng_db.classes
+limit 
+    100
+    
+    
+    
+select 
+    max(class_start_datetime)
+from 
+    skyeng_db.classes
+limit 100
+
+
+select 
+    user_id
+from 
+    skyeng_db.classes
+group by 
+    user_id
+having 
+    count(case when class_status = 'success' and class_type = 'trial' then 1 end) > 0 
+    and max(class_start_datetime) < '2017-12-01'
+
+ИЛИ 
+
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+
+
+
+
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+
+
+
+
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+, all_dates as (
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+)
+select 
+    a.*,
+    a.class_start_datetime - a.previous_class as delta_days
+from 
+    all_dates a
+
+
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+, all_dates as (
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+)
+select 
+    a.*,
+    a.class_start_datetime - coalesce(a.previous_class, a.class_start_datetime) as delta_days
+from 
+    all_dates a
+
+
+
+
+
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+, all_dates as (
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+)
+, delta_days as (
+select 
+    a.*,
+    a.class_start_datetime - coalesce(a.previous_class, a.class_start_datetime) as delta_days
+from 
+    all_dates a
+)
+select 
+    d.*,
+    case when delta_days >= interval '30 days' then 1 else 0 end as is_churn
+from 
+    delta_days d 
+order by 
+    user_id, class_start_datetime
+limit 100
+
+
+
+
+
+
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+, all_dates as (
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+)
+, delta_days as (
+select 
+    a.*,
+    a.class_start_datetime - coalesce(a.previous_class, a.class_start_datetime) as delta_days
+from 
+    all_dates a
+)
+, churn_detection as (
+ select 
+    d.*,
+    case when delta_days >= interval '30 days' then 1 else 0 end as is_churn
+from 
+    delta_days d 
+order by 
+    user_id, class_start_datetime
+)
+select 
+    c.*,
+    sum(c.is_churn) over(partition by c.user_id order by c.class_start_datetime) as streaks
+from 
+    churn_detection c 
+order by 
+    user_id, class_start_datetime
+
+
+
+
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+, all_dates as (
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+)
+, delta_days as (
+select 
+    a.*,
+    a.class_start_datetime - coalesce(a.previous_class, a.class_start_datetime) as delta_days
+from 
+    all_dates a
+)
+, churn_detection as (
+ select 
+    d.*,
+    case when delta_days >= interval '30 days' then 1 else 0 end as is_churn
+from 
+    delta_days d 
+order by 
+    user_id, class_start_datetime
+)
+, streaks as (
+select 
+    c.*,
+    avg(delta_days) over(partition by c.user_id) as user_avg_delta_days,
+    sum(c.is_churn) over(partition by c.user_id order by c.class_start_datetime) as streak_number
+from 
+    churn_detection c 
+order by 
+    user_id, class_start_datetime
+)
+select 
+    s.*,
+    max(case when class_type = 'trial' then class_type end) over(partition by user_id, streak_number) trial_happened
+from 
+    streaks s 
+order by 
+    user_id, class_start_datetime
+    
+
+
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+, all_dates as (
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+)
+, delta_days as (
+select 
+    a.*,
+    a.class_start_datetime - coalesce(a.previous_class, a.class_start_datetime) as delta_days
+from 
+    all_dates a
+)
+, churn_detection as (
+ select 
+    d.*,
+    case when delta_days >= interval '30 days' then 1 else 0 end as is_churn
+from 
+    delta_days d 
+order by 
+    user_id, class_start_datetime
+)
+, streaks as (
+select 
+    c.*,
+    avg(delta_days) over(partition by c.user_id) as user_avg_delta_days,
+    sum(c.is_churn) over(partition by c.user_id order by c.class_start_datetime) as streak_number
+from 
+    churn_detection c 
+order by 
+    user_id, class_start_datetime
+)
+, streak_trial as (
+select 
+    s.*,
+    max(case when class_type = 'trial' then class_type end) over(partition by user_id, streak_number) trial_happened
+from 
+    streaks s 
+order by 
+    user_id, class_start_datetime
+)
+select 
+    user_id,
+    streak_number,
+    count(1) as classes_count
+from 
+    streak_trial
+where 
+    trial_happened = 'trial'
+group by 
+    1, 2
+
+    
+
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+, all_dates as (
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    -- and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+)
+, delta_days as (
+select 
+    a.*,
+    a.class_start_datetime - coalesce(a.previous_class, a.class_start_datetime) as delta_days
+from 
+    all_dates a
+)
+, churn_detection as (
+ select 
+    d.*,
+    case when delta_days >= interval '30 days' then 1 else 0 end as is_churn
+from 
+    delta_days d 
+order by 
+    user_id, class_start_datetime
+)
+, streaks as (
+select 
+    c.*,
+    avg(delta_days) over(partition by c.user_id) as user_avg_delta_days,
+    sum(c.is_churn) over(partition by c.user_id order by c.class_start_datetime) as streak_number
+from 
+    churn_detection c 
+order by 
+    user_id, class_start_datetime
+)
+, streak_trial as (
+select 
+    s.*,
+    max(case when class_type = 'trial' then class_type end) over(partition by user_id, streak_number) trial_happened
+from 
+    streaks s 
+order by 
+    user_id, class_start_datetime
+)
+, user_lessons as (
+select 
+    user_id,
+    streak_number,
+    count(1) as classes_count
+from 
+    streak_trial
+where 
+    trial_happened is not null
+group by 
+    1, 2
+)
+select 
+    avg(classes_count)
+from
+    user_lessons
+
+
+
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+, all_dates as (
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    -- and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+)
+, delta_days as (
+select 
+    a.*,
+    a.class_start_datetime - coalesce(a.previous_class, a.class_start_datetime) as delta_days
+from 
+    all_dates a
+)
+, churn_detection as (
+ select 
+    d.*,
+    case when delta_days >= interval '30 days' then 1 else 0 end as is_churn
+from 
+    delta_days d 
+order by 
+    user_id, class_start_datetime
+)
+, streaks as (
+select 
+    c.*,
+    avg(delta_days) over(partition by c.user_id) as user_avg_delta_days,
+    sum(c.is_churn) over(partition by c.user_id order by c.class_start_datetime) as streak_number
+from 
+    churn_detection c 
+order by 
+    user_id, class_start_datetime
+)
+, streak_trial as (
+select 
+    s.*,
+    max(case when class_type = 'trial' then class_type end) over(partition by user_id, streak_number) trial_happened
+from 
+    streaks s 
+order by 
+    user_id, class_start_datetime
+)
+, user_lessons as (
+select 
+    user_id,
+    streak_number,
+    count(1) as classes_count
+from 
+    streak_trial
+where 
+    trial_happened is not null
+group by 
+    1, 2
+)
+select 
+    avg(classes_count),
+    percentile_cont(0.5) within group (order by classes_count) median_classes
+from
+    user_lessons
+    
+    
+    
+with needed_users as (
+select 
+    user_id
+from 
+    skyeng_db.classes
+where 
+    class_status = 'success' 
+    and class_type = 'trial'
+group by 
+    user_id
+having 
+    max(class_start_datetime) < '2017-12-01'
+)
+, all_dates as (
+select 
+    c.*,
+    lag(c.class_start_datetime) over(partition by c.user_id order by c.class_start_datetime) previous_class
+from 
+    skyeng_db.classes c 
+    join needed_users n on n.user_id = c.user_id  -- using(user_id)
+where 
+    c.class_status = 'success'
+    -- and c.user_id = '325348'
+order by 
+    user_id, class_start_datetime
+)
+, delta_days as (
+select 
+    a.*,
+    a.class_start_datetime - coalesce(a.previous_class, a.class_start_datetime) as delta_days
+from 
+    all_dates a
+)
+, churn_detection as (
+ select 
+    d.*,
+    case when delta_days >= interval '30 days' then 1 else 0 end as is_churn
+from 
+    delta_days d 
+order by 
+    user_id, class_start_datetime
+)
+, streaks as (
+select 
+    c.*,
+    avg(delta_days) over(partition by c.user_id) as user_avg_delta_days,
+    sum(c.is_churn) over(partition by c.user_id order by c.class_start_datetime) as streak_number
+from 
+    churn_detection c 
+order by 
+    user_id, class_start_datetime
+)
+, streak_trial as (
+select 
+    s.*,
+    max(case when class_type = 'trial' then class_type end) over(partition by user_id, streak_number) trial_happened
+from 
+    streaks s 
+order by 
+    user_id, class_start_datetime
+)
+, user_lessons as (
+select 
+    user_id,
+    streak_number,
+    count(1) as classes_count
+from 
+    streak_trial
+where 
+    trial_happened is not null
+group by 
+    1, 2
+)
+select 
+    avg(classes_count),
+    percentile_cont(0.5) within group (order by classes_count) median_classes
+from
+    user_lessons
+where 
+    classes_count > 1
+
